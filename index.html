@@ -152,6 +152,56 @@
             animation: spin 1s linear infinite;
         }
 
+        .toggle-switch-container {
+            display: flex;
+            align-items: center;
+            margin-left: 1.5rem; /* Space from the download button */
+        }
+
+        .toggle-label {
+            margin-right: 0.5rem; /* Space between label text and switch */
+            color: #2d3748; /* Match heading color */
+            font-size: 0.9rem;
+        }
+
+        .toggle-checkbox {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+
+        .toggle-switch-custom {
+            cursor: pointer;
+            width: 44px; /* Width of the switch track */
+            height: 22px; /* Height of the switch track */
+            background-color: #ccc;
+            display: inline-block;
+            border-radius: 22px; /* Fully rounded ends */
+            position: relative;
+            transition: background-color 0.3s ease;
+        }
+
+        .toggle-switch-custom::after {
+            content: '';
+            position: absolute;
+            top: 2px; /* Padding from top */
+            left: 2px; /* Padding from left */
+            width: 18px; /* Diameter of the knob */
+            height: 18px; /* Diameter of the knob */
+            background-color: white;
+            border-radius: 50%; /* Make it circular */
+            transition: transform 0.3s ease;
+        }
+
+        .toggle-checkbox:checked + .toggle-switch-custom {
+            background-color: #48bb78; /* Green when active */
+        }
+
+        .toggle-checkbox:checked + .toggle-switch-custom::after {
+            transform: translateX(22px); /* Move knob to the right */
+        }
+
         .loadingText {
             margin-top: 1rem;
             color: white;
@@ -180,6 +230,11 @@
             <input type="file" id="imageInput" accept="image/*"/>
         </div>
         <a id="imageDownload" href="#" download class="disable">Download Image</a>
+        <div class="toggle-switch-container">
+            <label for="quantizedModelToggle" class="toggle-label">Use Quantized Model</label>
+            <input type="checkbox" id="quantizedModelToggle" class="toggle-checkbox" checked>
+            <span class="toggle-switch-custom"></span>
+        </div>
     </div>
     <div class="canvas-container">
         <canvas id="originalCanvas"></canvas>
@@ -199,6 +254,7 @@
 
 <script>
 	let myOrtSession;
+    let useQuantizedModel = true; // Default to true, as checkbox is checked
 
 	const preprocess = (input_imageData, width, height) => {
 		const floatArr = new Float32Array(width * height * 3);
@@ -260,14 +316,25 @@
 
 	const deoldifyArtUrl = "https://cdn.glitch.me/2046b88b-673a-457f-b1b8-7169ce9bf13a/deoldify-art.onnx"
 	const deoldifyQuantUrl = "https://cdn.glitch.me/2046b88b-673a-457f-b1b8-7169ce9bf13a/deoldify-quant.onnx"
-	const loadModel = async (quantized) => {
+	const loadModel = async () => {
 		try {
-			if (!myOrtSession) {
-				myOrtSession = await ort.InferenceSession.create(quantized ?? true ? deoldifyQuantUrl : deoldifyArtUrl);
+            const modelUrl = useQuantizedModel ? deoldifyQuantUrl : deoldifyArtUrl;
+            // Check if a session exists and if the model URL is different
+			if (!myOrtSession || myOrtSession.modelUrl !== modelUrl) {
+                if (myOrtSession) {
+                    console.log("Releasing previous model session.");
+                    await myOrtSession.release();
+                    myOrtSession = null;
+                }
+                console.log(`Loading model: ${modelUrl}`);
+				myOrtSession = await ort.InferenceSession.create(modelUrl);
+                myOrtSession.modelUrl = modelUrl; // Store the URL of the loaded model
+                console.log("Model loaded successfully.");
 			}
 		} catch (error) {
 			console.error("Error loading model:", error);
 			hideLoading();
+            alert("Failed to load the AI model. Please check the console for details.");
 		}
 	};
 
@@ -282,7 +349,7 @@
 	const runMyModel = async (image) => {
 		try {
 			showLoading();
-			await loadModel(true);
+			await loadModel(); // loadModel will use the useQuantizedModel flag
 
 			const size = 256;
 			let canvas = document.getElementById("originalCanvas");
@@ -462,8 +529,48 @@
 
 	});
 
-	// Load the model when the page loads
-	window.onload = loadModel;
+	// Load the model when the page loads and set up toggle listener
+    window.onload = () => {
+        loadModel(); // Initial model load based on default useQuantizedModel
+
+        const quantizedModelToggle = document.getElementById('quantizedModelToggle');
+        const toggleLabel = document.querySelector('.toggle-label'); // Get the label element
+
+        // Update label text based on initial state
+        if (toggleLabel) {
+            toggleLabel.textContent = `Use Quantized Model (${useQuantizedModel ? 'Fast, Smaller' : 'High Quality, Larger'})`;
+        }
+
+
+        if (quantizedModelToggle) {
+            quantizedModelToggle.addEventListener('change', async function() {
+                useQuantizedModel = this.checked;
+                console.log(`Quantized model toggle changed. Use Quantized: ${useQuantizedModel}`);
+
+                // Update label text
+                if (toggleLabel) {
+                    toggleLabel.textContent = `Use Quantized Model (${useQuantizedModel ? 'Fast, Smaller' : 'High Quality, Larger'})`;
+                }
+
+                // Release current session to force reload on next runMyModel or if we want to load immediately
+                if (myOrtSession) {
+                    console.log("Model selection changed, releasing current ONNX session.");
+                    await myOrtSession.release();
+                    myOrtSession = null;
+                }
+                // Optionally, you can immediately load the new model here,
+                // though loadModel() will be called by runMyModel anyway.
+                // For a smoother experience, especially if model loading is quick,
+                // or to show loading indicator:
+                // showLoading();
+                // await loadModel();
+                // hideLoading();
+                console.log(`Switched to ${useQuantizedModel ? 'quantized' : 'artistic'} model. Next operation will use this model.`);
+            });
+        } else {
+            console.error("Could not find the quantizedModelToggle element.");
+        }
+    };
 </script>
 </body>
 </html>
